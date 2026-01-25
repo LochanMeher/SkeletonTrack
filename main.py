@@ -13,7 +13,7 @@ import numpy as np
 import time
 from collections import defaultdict
 from threading import Thread
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import json
 from utils.streaming import AndroidCameraCapture
@@ -42,6 +42,12 @@ lock = __import__('threading').Lock()
 from utils.movenet_inference import MoveNetInference
 
 pose_detector = MoveNetInference()
+
+# ==================== ALERT ENGINE SETUP ====================
+from utils.pose_alerts import PoseAlertEngine
+
+alert_engine = PoseAlertEngine(confidence_threshold=0.3, temporal_window=3)
+alert_history = []  # Store all alerts for logging
 
 # ==================== TRACKING SETUP ====================
 tracker = CentroidTracker(maxDisappeared=MAX_PERSON_TTL)
@@ -76,6 +82,81 @@ def health():
     """Health check"""
     return jsonify({'status': 'running'})
 
+
+@app.route('/api/alerts', methods=['GET'])
+def get_alerts():
+    """Get all active alerts"""
+    with lock:
+        alerts = alert_engine.get_active_alerts()
+        return jsonify({
+            'timestamp': time.time(),
+            'active_alerts': len(alerts),
+            'alerts': [
+                {
+                    'person_id': alert.person_id,
+                    'pose_type': alert.pose_type,
+                    'alert_type': alert.alert_type,
+                    'confidence': alert.confidence,
+                    'timestamp': alert.timestamp,
+                    'message': alert.message
+                }
+                for alert in alerts
+            ]
+        })
+
+@app.route('/api/alerts/<int:person_id>', methods=['GET'])
+def get_person_alerts(person_id):
+    """Get alerts for specific person"""
+    with lock:
+        alerts = alert_engine.get_person_alerts(person_id)
+        return jsonify({
+            'person_id': person_id,
+            'alerts': [
+                {
+                    'pose_type': alert.pose_type,
+                    'alert_type': alert.alert_type,
+                    'confidence': alert.confidence,
+                    'timestamp': alert.timestamp,
+                    'message': alert.message
+                }
+                for alert in alerts
+            ]
+        })
+
+@app.route('/api/alerts/config', methods=['GET', 'POST'])
+def alert_config():
+    """Get/set alert configuration"""
+    if request.method == 'GET':
+        return jsonify(alert_engine.get_config())
+    
+    elif request.method == 'POST':
+        data = request.get_json()
+        if 'confidence_threshold' in data:
+            alert_engine.confidence_threshold = data['confidence_threshold']
+        if 'temporal_window' in data:
+            alert_engine.temporal_window = data['temporal_window']
+        if 'enabled_poses' in data:
+            for pose, enabled in data['enabled_poses'].items():
+                alert_engine.set_pose_enabled(pose, enabled)
+        return jsonify({'status': 'updated'})
+
+@app.route('/api/alerts/history', methods=['GET'])
+def get_alert_history():
+    """Get alert history (last 100)"""
+    with lock:
+        return jsonify({
+            'total': len(alert_history),
+            'recent': [
+                {
+                    'person_id': alert.person_id,
+                    'pose_type': alert.pose_type,
+                    'alert_type': alert.alert_type,
+                    'timestamp': alert.timestamp,
+                    'message': alert.message
+                }
+                for alert in alert_history[-100:]
+            ]
+        })
 # ==================== MAIN INFERENCE LOOP ====================
 def inference_loop():
     """Main pose detection and tracking loop"""
@@ -116,6 +197,25 @@ def inference_loop():
         # ========== MULTI-PERSON TRACKING ==========
         objects = tracker.update([d['centroid'] for d in detections])
         
+        # ========== POSE-BASED ALERTS ==========
+        new_alerts = alert_engine.update(pose_results)
+        
+        if new_alerts:
+            print(f"DEBUG: New alerts created: {len(new_alerts)}")
+            for alert in new_alerts:
+                alert_history.append(alert)
+                print(f"🚨 {alert.message} (Confidence: {alert.confidence:.2f})")
+        
+        # Debug: Show pose history
+        if pose_results:
+            for person_id, poses in alert_engine.pose_history.items():
+                print(f"DEBUG: Person {person_id} pose_history = {poses}")
+        
+        # Debug: Show active alerts in engine
+        active = alert_engine.get_active_alerts()
+        if active:
+            print(f"DEBUG: Active alerts in engine: {len(active)}")
+            
         # ========== ASSOCIATE DETECTIONS TO TRACKED IDS ==========
         with lock:
             pose_results = {}

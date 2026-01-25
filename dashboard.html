@@ -309,6 +309,35 @@
             <h2 style="margin-top: 20px;">🔗 API Endpoint</h2>
             <div class="api-url" id="apiUrl"></div>
         </div>
+        <div class="bottom-info" style="margin-top: 20px;">
+            <h2>🚨 Active Alerts</h2>
+            <div id="alertPanel" style="max-height: 300px; overflow-y: auto;">
+                <p style="color: #999; text-align: center;">No active alerts</p>
+            </div>
+        </div>
+
+        <div class="bottom-info">
+            <h2>⚙️ Alert Configuration</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                <label style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="alertHandsUp" checked>
+                    <span>Hands Up</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="alertSitting" checked>
+                    <span>Sitting</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="alertLying" checked>
+                    <span>Lying Down</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 10px;">
+                    <input type="checkbox" id="alertFalling" checked>
+                    <span>Falling</span>
+                </label>
+            </div>
+            <button onclick="updateAlertConfig()" style="margin-top: 15px; padding: 10px 20px; background: #2a5298; color: white; border: none; border-radius: 4px; cursor: pointer;">Update Config</button>
+        </div>
     </div>
 
     <script>
@@ -509,6 +538,88 @@
         setInterval(fetchPoses, 100);  // Update 10 times per second
 
         console.log('✓ Dashboard loaded. Connecting to API:', API_URL);
+        // ==================== ALERT SYSTEM ====================
+const ALERT_API_URL = 'http://localhost:5000/api/alerts';
+
+async function fetchAlerts() {
+    try {
+        const response = await fetch(ALERT_API_URL);
+        const data = await response.json();
+        
+        updateAlertPanel(data.alerts);
+        
+    } catch (error) {
+        console.error('Alert fetch error:', error);
+    }
+}
+
+function updateAlertPanel(alerts) {
+    const panel = document.getElementById('alertPanel');
+    
+    if (alerts.length === 0) {
+        panel.innerHTML = '<p style="color: #999; text-align: center;">No active alerts</p>';
+        return;
+    }
+    
+    let html = '';
+    
+    for (const alert of alerts) {
+        const alertColor = alert.alert_type === 'CRITICAL' ? '#f44336' : 
+                          alert.alert_type === 'WARNING' ? '#ff9800' : '#4CAF50';
+        
+        const alertIcon = alert.alert_type === 'CRITICAL' ? '🚨' : 
+                         alert.alert_type === 'WARNING' ? '⚠️' : 'ℹ️';
+        
+        html += `
+            <div style="
+                background: ${alertColor}22;
+                border-left: 4px solid ${alertColor};
+                padding: 12px;
+                margin-bottom: 10px;
+                border-radius: 4px;
+            ">
+                <div style="color: ${alertColor}; font-weight: bold; margin-bottom: 5px;">
+                    ${alertIcon} ${alert.message}
+                </div>
+                <div style="font-size: 0.85em; color: #666;">
+                    Pose: ${alert.pose_type} | Confidence: ${(alert.confidence * 100).toFixed(0)}%
+                </div>
+            </div>
+        `;
+    }
+    
+    panel.innerHTML = html;
+}
+
+async function updateAlertConfig() {
+    const config = {
+        enabled_poses: {
+            'hands_up': document.getElementById('alertHandsUp').checked,
+            'sitting': document.getElementById('alertSitting').checked,
+            'lying_down': document.getElementById('alertLying').checked,
+            'falling': document.getElementById('alertFalling').checked,
+            'phone_use': false
+        }
+    };
+    
+    try {
+        const response = await fetch('http://localhost:5000/api/alerts/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        
+        const result = await response.json();
+        alert('Alert config updated!');
+        
+    } catch (error) {
+        console.error('Config update error:', error);
+        alert('Failed to update config');
+    }
+}
+
+// Fetch alerts every 500ms (twice per frame @ 30fps)
+setInterval(fetchAlerts, 500);
     </script>
 </body>
 </html>

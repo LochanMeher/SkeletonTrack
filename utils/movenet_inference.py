@@ -36,42 +36,18 @@ class MoveNetInference:
     
     def detect(self, frame):
         """
-        Detect persons using grid-based approach for multi-person
-        
-        Args:
-            frame: Input image (BGR)
-        
-        Returns:
-            List of detected persons with keypoints
+        Detect persons - simplified single detection
         """
         h, w = frame.shape[:2]
         persons = []
         
-        # Try detecting full frame first
+        # Detect full frame only (no grid splitting to avoid false positives)
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         results = self.pose.process(rgb_frame)
         
         if results.pose_landmarks:
-            # Extract person from full frame
             person = self._extract_person(results, frame)
             if person:
-                persons.append(person)
-        
-        # Also try detecting on left and right halves for multiple people
-        # Left half
-        left_half = frame[:, :w//2]
-        results_left = self.pose.process(cv2.cvtColor(left_half, cv2.COLOR_BGR2RGB))
-        if results_left.pose_landmarks:
-            person = self._extract_person(results_left, left_half, x_offset=0)
-            if person and not self._is_duplicate(person, persons):
-                persons.append(person)
-        
-        # Right half
-        right_half = frame[:, w//2:]
-        results_right = self.pose.process(cv2.cvtColor(right_half, cv2.COLOR_BGR2RGB))
-        if results_right.pose_landmarks:
-            person = self._extract_person(results_right, right_half, x_offset=w//2)
-            if person and not self._is_duplicate(person, persons):
                 persons.append(person)
         
         return persons
